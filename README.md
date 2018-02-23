@@ -1,2 +1,2 @@
 # cnn
-Application of Convolutional Neural Networks
+Convolutional Neural Networks using Tensorflow
