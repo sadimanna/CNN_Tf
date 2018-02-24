@@ -44,9 +44,9 @@ def augment_data(image_array,label_array,naug=5):
 	labels_tensor = tf.reshape(labels_tensor,list(labels_tensor.shape)+[1])
 	#print labels_tensor.shape
 	#print 'Each image::',image_array[0].shape
-	for na in xrange(1):
+	for na in xrange(naug):
 		print 'Augmentation Step :',na+1
-		stime = time.time()
+		#stime = time.time()
 		for nimg in xrange(image_array.shape[0]):
 			args = get_random_augmentation_combinations(7)
 			transformed_image = get_transformed_image(image_array[nimg],args[0],args[1],args[2],args[3],args[4],args[5],args[6])
@@ -56,5 +56,5 @@ def augment_data(image_array,label_array,naug=5):
 			#print images_tensor.shape
 			#print label_array[nimg]
 			labels_tensor = tf.concat([labels_tensor,tf.reshape(tf.convert_to_tensor(np.array([label_array[nimg]])),[1,1])],axis=0)
-		print time.time() - stime
+		#print time.time() - stime
 	return images_tensor,labels_tensor
