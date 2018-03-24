@@ -15,7 +15,7 @@ def conv2d(inp,name,kshape,s):
 		kernel = get_weights('weights',shape=kshape)
 		conv = tf.nn.conv2d(inp,kernel,[1,s,s,1],'SAME')
 		bias = get_bias('biases',shape=kshape[3])
-		preact = tf.nn.add_bias(conv,bias)
+		preact = tf.nn.bias_add(conv,bias)
 		convlayer = tf.nn.relu(preact,name=scope.name)
 	return convlayer
 
@@ -28,25 +28,29 @@ def dropout(inp,keep_prob,training):
 	else:
 		return tf.nn.dropout(inp,tf.constant(1.0,dtype=tf.float32))
 
-def fc(inp,name,ksize,N=1):
+def fc(inp,name,ksize,N=1,apply_relu=False):
 	with tf.variable_scope(name) as scope:
 		if N!=1:
-			flattened = tf.reshape(inp,[N,-1])
+			flattened = tf.reshape(inp,[-1,N])
 		else:
 			flattened = inp
 		dim = flattened.get_shape().as_list()[1]
 		weights = get_weights('weights',shape=[dim,ksize])
 		biases = get_bias('bias',[ksize])
-		fc = tf.nn.relu(tf.add(tf.matmul(flattened,weights),biases),name=scope.name)
+		if apply_relu:
+			fc = tf.nn.relu(tf.add(tf.matmul(flattened,weights),biases),name=scope.name)
+		else:
+			fc = tf.add(tf.matmul(flattened,weights),biases,name=scope.name)
 	return fc
 		
 #VGG Net Model
-def nn_model(images,labels):
+def nn_model(images):
 	imgshape = images.get_shape().as_list()
+	#print imgshape
 	imgh = imgshape[1]
 	imgw = imgshape[2]
 	#size = [N,96,96,3]
-	images = tf.cast(images,tf.float16)
+	images = tf.cast(images,tf.float32)
 	#conv1
 	conv1 = conv2d(images,'conv1',[3,3,3,64],1)
 	#conv2
@@ -94,24 +98,26 @@ def nn_model(images,labels):
 	#pool5
 	pool5 = maxpool(conv16,'pool5',2,2)
 	#size = [N,3,3,512]
-	N = imgshape[0]
+	pool5shape = pool5.get_shape().as_list()
+	N = pool5shape[1]*pool5shape[2]*pool5shape[3]
 	#keepprob
 	keep_prob = tf.constant(0.5,dtype=tf.float32)
 	#fc1
-	fc1 = fc(pool5,'fc1',2048,N)
+	fc1 = fc(pool5,'fc1',2048,N,True)
 	#dropout1
 	dropout1 = dropout(fc1,keep_prob,training=True)
 	#fc2
-	fc2 = fc(dropout1,'fc2',2048,1)
+	fc2 = fc(dropout1,'fc2',2048,1,True)
 	#dropout2
 	dropout2 = dropout(fc2,keep_prob,training=True)
 	#fc3
-	fc3 = fc(dropout2,'fc3',11,1)
+	fc3 = fc(dropout2,'fc3',11,1,False)
 	#11 since 10 for the trainable classes and 1 extra for the unknown
 	return fc3
 
 def loss(logits,labels):
-	labels = tf.cast(labels,tf.int64)
+	labels = tf.reshape(tf.cast(labels,tf.int64),[-1])
+	#print labels.get_shape().as_list(),logits.get_shape().as_list()
 	cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels,logits=logits,name='cross_entropy_per_example')
 	cross_entropy_mean = tf.reduce_mean(cross_entropy,name='cross_entropy')
 	total_loss = tf.add(tf.reduce_sum(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)),cross_entropy_mean,name='total_loss')
@@ -120,8 +126,11 @@ def loss(logits,labels):
 def optimizer(loss):
 	return tf.train.AdamOptimizer().minimize(loss)
 	
-def accuracy(pred_labels,true_labels):
-	correct_pred = tf.equal(pred_labels,true_labels)
+def accuracy(logits,true_labels):
+	pred_labels = tf.argmax(logits,1)
+	true_labels = tf.cast(true_labels,tf.int64)
+	print pred_labels,true_labels
+	correct_pred = tf.cast(tf.equal(pred_labels, true_labels), tf.float32)
 	accuracy = tf.reduce_mean(tf.cast(correct_pred,tf.float32))
 	return accuracy
 	

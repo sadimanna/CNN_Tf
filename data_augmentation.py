@@ -40,29 +40,22 @@ def get_random_augmentation_combinations(length):
 	out = [True,False]
 	return [random.choice(out) for i in xrange(length)]
 	
-def augment_data(image_tensor,label_tensor,sess,naug=5):
-	#return 0
-	#labels_tensor = label_tensor.eval(session=sess)
-	#print label_tensor.eval(session=sess)
-	#print 'in aug:',labels_tensor.eval(session=sess)
+def augment_data(image_tensor,label_tensor,sess,naug=3):
 	label_tensor = tf.reshape(label_tensor,list(label_tensor.get_shape())+[1])
 	images_array = np.array(image_tensor.eval(session=sess))
 	labels_array = np.array(label_tensor.eval(session=sess))
-	print 'in aug la:',labels_array
-	print labels_array.shape
+	#print 'in aug la:',labels_array
+	#print labels_array.shape
 	labels_array = np.reshape(labels_array,(-1,1))
-	print labels_array.shape
+	#print labels_array.shape
 	#print 'Each image::',image_array[0].shape
 	nImg = images_array.shape
-	print nImg
+	#print nImg
 	augtime = time.time()
 	for na in xrange(naug):
-		print 'Augmentation Step :',na+1
+		#print 'Augmentation Step :',na+1
 		stime = time.time()
 		for nimg in xrange(nImg[0]):
-			if(nimg+1)%1000==0:
-				print 'Image no. ',nimg+1
-			print 'ls nimg:',labels_array[nimg]
 			args = get_random_augmentation_combinations(7)
 			transformed_image = get_transformed_image(images_array[nimg],args[0],args[1],args[2],args[3],args[4],args[5],args[6])
 			#print transformed_image
@@ -71,8 +64,8 @@ def augment_data(image_tensor,label_tensor,sess,naug=5):
 			image_tensor = tf.concat([image_tensor,transformed_image],axis=0)
 			#print image_tensor.shape
 			label_tensor = tf.concat([label_tensor,tf.reshape(tf.convert_to_tensor(labels_array[nimg]),[1,1])],axis=0)
-		print time.time() - stime,'seconds'
-		print image_tensor.get_shape()
+		#print time.time() - stime,'seconds'
+		#print image_tensor.get_shape()
 	#print tf.contrib.framework.is_tensor(images_tensor)
-	print 'Total time taken:',time.time()-augtime,' seconds'
+	print 'Total time taken for augmentation:',time.time()-augtime,' seconds'
 	return image_tensor,label_tensor
