@@ -47,7 +47,6 @@ def nn_model(images,labels):
 	imgw = imgshape[2]
 	#size = [N,96,96,3]
 	images = tf.cast(images,tf.float16)
-	labels = tf.cast(labels,tf.float16)
 	#conv1
 	conv1 = conv2d(images,'conv1',[3,3,3,64],1)
 	#conv2
@@ -110,5 +109,19 @@ def nn_model(images,labels):
 	fc3 = fc(dropout2,'fc3',11,1)
 	#11 since 10 for the trainable classes and 1 extra for the unknown
 	return fc3
+
+def loss(logits,labels):
+	labels = tf.cast(labels,tf.int64)
+	cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels,logits=logits,name='cross_entropy_per_example')
+	cross_entropy_mean = tf.reduce_mean(cross_entropy,name='cross_entropy')
+	total_loss = tf.add(tf.reduce_sum(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)),cross_entropy_mean,name='total_loss')
+	return total_loss
+
+def optimizer(loss):
+	return tf.train.AdamOptimizer().minimize(loss)
 	
+def accuracy(pred_labels,true_labels):
+	correct_pred = tf.equal(pred_labels,true_labels)
+	accuracy = tf.reduce_mean(tf.cast(correct_pred,tf.float32))
+	return accuracy
 	
