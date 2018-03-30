@@ -1,9 +1,7 @@
 import numpy as np
 import tensorflow as tf
-import time
+import time, random
 import matplotlib.pyplot as plt
-from dataset import get_dataset
-from data_augmentation import augment_data
 from cnn_model import nn_model,loss,optimizer,accuracy
 import warnings
 warnings.simplefilter("ignore", DeprecationWarning)
@@ -11,109 +9,168 @@ warnings.simplefilter("ignore", FutureWarning)
 
 tf.logging.set_verbosity(tf.logging.INFO)
 
-def create_next_batch_iterator(dataset,seedin = 6,batch_size = 10):
-	#Setting batch size
-	batch_size = batch_size
-	#Shuffling the dataset
-	shuffled_ds = dataset.shuffle(100,seed = seedin,reshuffle_each_iteration = True)
-	#Getting batch_size number of images
-	batch = shuffled_ds.apply(tf.contrib.data.batch_and_drop_remainder(batch_size))
-	#Creating a iterator for the dataset
-	#iterator = batch.make_one_shot_iterator()
-	iterator = batch.make_initializable_iterator()
-	#Getting the next batch
-	#next_batch = iterator.get_next())
-	return iterator
+def get_random_rotation_angle():
+	return random.randint(-45,45)
 
-def get_next_batch(iterator):
-	next_batch = iterator.get_next()
-	return tf.Variable(next_batch['images']),tf.Variable(next_batch['labels'])
-	#return iterator.get_next()
+def get_random():
+	return random.randint(0,2)/10.0
+	
+def get_new_size():
+	new_size = 96 + random.choice([24,16])
+	return [new_size,new_size]
+	
+def get_random_augmentation_combinations(length):
+	out = [True,False]
+	return [random.choice(out) for i in xrange(length)]
 
+def get_all_images(img_file):
+	images = np.fromfile(img_file,dtype=np.uint8).astype(np.float32)
+	images = np.reshape(images,(-1,3,96,96))
+	images = np.transpose(images,(0,3,2,1))
+	print 'Normalizing Inputs...'
+	rmean = np.mean(images[:,:,:,0])
+	gmean = np.mean(images[:,:,:,1])
+	bmean = np.mean(images[:,:,:,2])
+	rstd = np.std(images[:,:,:,0])
+	gstd = np.std(images[:,:,:,1])
+	bstd = np.std(images[:,:,:,2])	
+	images[:,:,:,0] = (images[:,:,:,0] - rmean)#/rstd
+	images[:,:,:,1] = (images[:,:,:,1] - gmean)#/gstd
+	images[:,:,:,2] = (images[:,:,:,2] - bmean)#/bstd
+	print 'R_mean:',rmean,'G_mean:',gmean,'B_mean:',bmean
+	print 'R_stddev:',rstd,'G_stddev:',gstd,'B_stddev:',bstd
+	return images,rmean,gmean,bmean
+	
+def get_all_labels(label_file):
+	labels = np.fromfile(label_file,dtype=np.uint8)
+	#print labels.shape
+	return labels
+
+def get_val_images(img_file,rmean,gmean,bmean):
+	images = np.fromfile(img_file,dtype=np.uint8).astype(np.float32)
+	images = np.reshape(images,(-1,3,96,96))
+	images = np.transpose(images,(0,3,2,1))
+	print 'Normalizing Validation Images...'
+	images[:,:,:,0] = (images[:,:,:,0] - rmean)#/rstd
+	images[:,:,:,1] = (images[:,:,:,1] - gmean)#/gstd
+	images[:,:,:,2] = (images[:,:,:,2] - bmean)#/bstd
+	return images
 
 #Create dataset
-dataset = get_dataset()
+#Getting the dataset
+print 'Getting the data...'
+train_data_path = '/floyd/train_X.bin' #/media/siladittya/fdc481ce-9355-46a9-b381-9001613e3422/siladittya/StudyMaterials/ISI/code/ds/stl10_binary
+train_label_path = '/floyd/train_y.bin'
+
+train_img_file = open(train_data_path,'rb')
+train_label_file = open(train_label_path,'rb')
+
+train_x,rmean,gmean,bmean = get_all_images(train_img_file)
+train_y = get_all_labels(train_label_file)
+
+#Getting Validation Dataset
+val_img_path = '/floyd/test_X.bin'
+val_label_path = '/floyd/test_y.bin'
+
+val_img_file = open(val_img_path,'rb')
+val_label_file = open(val_label_path,'rb')
+
+val_x = get_val_images(val_img_file,rmean,gmean,bmean)
+val_y = get_all_labels(val_label_file)
+print'Getting Validation set from Test set...'
+val_x = val_x[:200]
+val_y = val_y[:200]
+
+index = np.arange(train_x.shape[0])
 #Set seed placeholder for setting a different seed in each epoch
 seedin = tf.placeholder(tf.int64,shape=())
-#Get iterator
-iterator = create_next_batch_iterator(dataset,seedin)
-'''
-#Initialize the Iterator
-sess = tf.Session()
-sess.run(iterator.initializer,feed_dict={seedin:6})
-
-#Get next batch
-next_batch = iterator.get_next()
-next_batch_images = tf.Variable(next_batch['images'])
-next_batch_labels = tf.Variable(next_batch['labels'])
-#print next_batch_labels.eval(session=sess)
-sess.run(tf.global_variables_initializer())
-print next_batch_labels
-print '1',sess.run(next_batch_labels)
-print '2',next_batch_labels.eval(session=sess)
-#print iterator.get_next()['labels'].eval(session=sess)
-#print '4',next_batch_labels.eval(session=sess)
-#print '5',sess.run(next_batch_labels)
-#print '6',next_batch['labels'].eval(session=sess)
-
-next_batch = augment_data(next_batch_images,next_batch_labels,sess)
-print next_batch[1]
-print next_batch[1].get_shape().as_list()
-print next_batch[1].eval(session=sess)
-'''
 #Keep count
 count = 0
 #........ This part will used to get training data for each epoch during training
 init_count = 0
-num_epochs = 10
-batchsize = 10
-numiter = 500
+num_epochs = 100
+batch_size = 40
+numiter = 125
 ne = 0
+valacc = []
 #Create session
 feed_images = tf.placeholder(tf.float32,shape=(None,96,96,3))
-feed_labels = tf.placeholder(tf.float32,shape=(None,1))
+feed_labels = tf.placeholder(tf.float32,shape=(None,))
 
-logits = nn_model(feed_images)
+aug_img = tf.placeholder(tf.float32,shape=(96,96,3))
+
+logits = nn_model(feed_images,training = True)
 
 cost = loss(logits,feed_labels)
 
-opt_adam = optimizer(cost)
+opt_mom = optimizer(lr=0.01)
+opt = opt_mom.minimize(cost)
 
 acc = accuracy(logits,feed_labels)
 
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
 
+img_scale_crop = tf.random_crop(tf.image.resize_images(aug_img,get_new_size()),[96,96,3])
+
+img_rand_flip_lr = tf.image.random_flip_left_right(aug_img)
+
+img_rand_flip_ud = tf.image.random_flip_up_down(aug_img)
+
+builder = tf.saved_model.builder.SavedModelBuilder("/output/cnn_model")
+
 while(ne<num_epochs):
-	print 'epoch::',ne,'...'
-	#Initialize the Iterator
-	sess.run(iterator.initializer,feed_dict={seedin:init_count})
+	stime = time.time()
+	print 'epoch::',ne+1,'...'
+	if ne != 0:
+		np.random.shuffle(index)
+		train_x = train_x[index]
+		train_y = train_y[index]
 	for niter in xrange(numiter):
 		print 'iter..',niter+1
-		stime = time.time()
-		#Get next training batch
-		next_batch = iterator.get_next()
-		next_images = tf.Variable(next_batch['images'],'bimages')
-		next_labels = tf.Variable(next_batch['labels'],'blabels')
-		sess.run(tf.variables_initializer([next_images,next_labels]))
-		next_batch = augment_data(next_images,next_labels,sess)
-		ni = next_batch[0].eval(session=sess)
-		nl = next_batch[1].eval(session=sess)
-		#print nl
-		feed_trdict={feed_images:ni,feed_labels:nl}
+		offset = niter*batch_size
+                x_iter, y_iter = np.array(train_x[offset:offset+batch_size,:,:,:]), np.array(train_y[offset:offset+batch_size])
+		y_iter=y_iter-1
+
+		print 'Data Augmenting...'
+		augtime = time.time()
+		for n in xrange(batch_size):
+			args = get_random_augmentation_combinations(3)
+			if args[0]:
+				x_iter[n] = sess.run(img_scale_crop,feed_dict={aug_img:x_iter[n]})
+			if args[1]:
+				x_iter[n] = sess.run(img_rand_flip_lr,feed_dict={aug_img:x_iter[n]})
+			if args[2]: 
+				x_iter[n] = sess.run(img_rand_flip_ud,feed_dict={aug_img:x_iter[n]})
+		print 'Time for augmentation:: ',time.time()-augtime,' seconds...'	
+		#print 'Labels::',nl.reshape([-1])
+		feed_trdict={feed_images:x_iter,feed_labels:y_iter}
 		#Train
-		sess.run(opt_adam,feed_dict=feed_trdict)
-		cc = sess.run(cost,feed_dict=feed_trdict)
-		#Get next Validation batch
-		#........................
+		sess.run(opt,feed_dict=feed_trdict)
+
 		#Calculate accuracy of Validation set
-		#if (niter+1)%10==0:
-		#	val_acc = sess.run(acc,feed_dict_acc = {true_labels:feed_labels})
-		tr_acc = sess.run(acc,feed_dict = feed_trdict)
-		print 'iter..',niter+1,'..tr_cost..',cc,'..tr_acc..',tr_acc*100,'%'
-		print 'Time reqd.::',time.time()-stime,'secs...'
+	if (ne+1)%10==0:
+		val_acc = sess.run(acc,feed_dict_acc = {feed_images:val_x,feed_labels:val_y})
+		print 'Epoch',ne+1,' Validation accuracy::',val_acc
+		valacc.append(val_acc)
+
+		if len(valacc)>=3 and (valacc[-1]-valacc[-2])-(valacc[-2]-valacc[-3]) < 10e-4:
+			print 'Change in Learning Rate applied...'
+			lr=lr/10
+			opt_mom = optimizer(lr)
+			opt = opt_mom.minimize(cost)
+
+	cc = sess.run(cost,feed_dict=feed_trdict)
+	tr_acc = sess.run(acc,feed_dict = feed_trdict)
+	print 'Epoch..',ne+1,
+	print 'Training cost::',cc,
+	print 'Training accuracy::',tr_acc*100,'%'
+	print 'Time reqd.::',(time.time()-stime)/60,'mins...'
 	init_count+=1
 	ne+=1
+
+builder.add_meta_graph_and_variables(sess, ["EVALUATING"])
+builder.save()
 
 #close session
 sess.close()

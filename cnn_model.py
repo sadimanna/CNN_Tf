@@ -8,7 +8,7 @@ def get_weights(name,shape):
 	return tf.get_variable(name=name,shape=shape,initializer = tf.contrib.layers.xavier_initializer(uniform=False),regularizer = tf.contrib.layers.l2_regularizer(tf.constant(0.0005, dtype=tf.float32)))
 
 def get_bias(name,shape):
-	return tf.get_variable(name=name,shape=shape,initializer = tf.contrib.layers.xavier_initializer(uniform=False))
+	return tf.get_variable(name=name,shape=shape,initializer = tf.zeros_initializer())
 
 def conv2d(inp,name,kshape,s):
 	with tf.variable_scope(name) as scope:
@@ -22,29 +22,25 @@ def conv2d(inp,name,kshape,s):
 def maxpool(inp,name,k,s):
 	return tf.nn.max_pool(inp,ksize=[1,k,k,1],strides=[1,s,s,1],padding='SAME',name=name)
 	
-def dropout(inp,keep_prob,training):
+def dropout(inp,keep_prob,training=False):
 	if training:
 		return tf.nn.dropout(inp,keep_prob)
 	else:
 		return tf.nn.dropout(inp,tf.constant(1.0,dtype=tf.float32))
-
-def fc(inp,name,ksize,N=1,apply_relu=False):
+'''
+def fc(inp,name,ksize,apply_relu=False):
 	with tf.variable_scope(name) as scope:
-		if N!=1:
-			flattened = tf.reshape(inp,[-1,N])
-		else:
-			flattened = inp
-		dim = flattened.get_shape().as_list()[1]
+		dim = inp.get_shape().as_list()[1]
 		weights = get_weights('weights',shape=[dim,ksize])
 		biases = get_bias('bias',[ksize])
 		if apply_relu:
-			fc = tf.nn.relu(tf.add(tf.matmul(flattened,weights),biases),name=scope.name)
+			fc = tf.nn.relu(tf.nn.bias_add(tf.matmul(inp,weights),biases),name=scope.name)
 		else:
-			fc = tf.add(tf.matmul(flattened,weights),biases,name=scope.name)
+			fc = tf.nn.bias_add(tf.matmul(inp,weights),biases,name=scope.name)
 	return fc
-		
-#VGG Net Model
-def nn_model(images):
+'''		
+#VGG16 Net Model
+def nn_model(images,training):
 	imgshape = images.get_shape().as_list()
 	#print imgshape
 	imgh = imgshape[1]
@@ -71,47 +67,43 @@ def nn_model(images):
 	conv6 = conv2d(conv5,'conv6',[3,3,256,256],1)
 	#conv7
 	conv7 = conv2d(conv6,'conv7',[3,3,256,256],1)
-	#conv8
-	conv8 = conv2d(conv7,'conv8',[3,3,256,256],1)
 	#pool3
-	pool3 = maxpool(conv8,'pool3',2,2)
+	pool3 = maxpool(conv7,'pool3',2,2)
 	#size = [N,12,12,256]
 	#conv9
-	conv9 = conv2d(pool3,'conv9',[3,3,256,512],1)
+	conv8 = conv2d(pool3,'conv8',[3,3,256,512],1)
 	#conv6
-	conv10 = conv2d(conv9,'conv10',[3,3,512,512],1)
+	conv9 = conv2d(conv8,'conv9',[3,3,512,512],1)
 	#conv7
-	conv11 = conv2d(conv10,'conv11',[3,3,512,512],1)
-	#conv8
-	conv12 = conv2d(conv11,'conv12',[3,3,512,512],1)
+	conv10 = conv2d(conv9,'conv10',[3,3,512,512],1)
 	#pool4
-	pool4 = maxpool(conv12,'pool4',2,2)
+	pool4 = maxpool(conv10,'pool4',2,2)
 	#size = [N,6,6,512]
 	#conv13
-	conv13 = conv2d(pool4,'conv13',[3,3,512,512],1)
+	conv11 = conv2d(pool4,'conv11',[3,3,512,512],1)
 	#conv6
-	conv14 = conv2d(conv13,'conv14',[3,3,512,512],1)
+	conv12 = conv2d(conv11,'conv12',[3,3,512,512],1)
 	#conv7
-	conv15 = conv2d(conv14,'conv15',[3,3,512,512],1)
-	#conv8
-	conv16 = conv2d(conv15,'conv16',[3,3,512,512],1)
+	conv13 = conv2d(conv12,'conv13',[3,3,512,512],1)
 	#pool5
-	pool5 = maxpool(conv16,'pool5',2,2)
+	pool5 = maxpool(conv13,'pool5',2,2)
 	#size = [N,3,3,512]
 	pool5shape = pool5.get_shape().as_list()
 	N = pool5shape[1]*pool5shape[2]*pool5shape[3]
 	#keepprob
 	keep_prob = tf.constant(0.5,dtype=tf.float32)
+	#flattened_pool5
+	flattened_pool5 = tf.contrib.layers.flatten(pool5)
 	#fc1
-	fc1 = fc(pool5,'fc1',2048,N,True)
+	fc1 = tf.contrib.layers.fully_connected(flattened_pool5,4096)
 	#dropout1
-	dropout1 = dropout(fc1,keep_prob,training=True)
+	dropout1 = dropout(fc1,keep_prob,training)
 	#fc2
-	fc2 = fc(dropout1,'fc2',2048,1,True)
+	fc2 = tf.contrib.layers.fully_connected(dropout1,4096)
 	#dropout2
-	dropout2 = dropout(fc2,keep_prob,training=True)
+	dropout2 = dropout(fc2,keep_prob,training)
 	#fc3
-	fc3 = fc(dropout2,'fc3',11,1,False)
+	fc3 = tf.contrib.layers.fully_connected(dropout2,10,activation_fn=None)
 	#11 since 10 for the trainable classes and 1 extra for the unknown
 	return fc3
 
@@ -123,13 +115,15 @@ def loss(logits,labels):
 	total_loss = tf.add(tf.reduce_sum(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)),cross_entropy_mean,name='total_loss')
 	return total_loss
 
-def optimizer(loss):
-	return tf.train.AdamOptimizer().minimize(loss)
+def optimizer(lr):
+	#return tf.train.AdamOptimizer(learning_rate=lr)
+	#return tf.train.GradientDescentOptimizer(learning_rate=lr)
+	return tf.train.MomentumOptimizer(learning_rate=lr,momentum=0.9)
 	
 def accuracy(logits,true_labels):
 	pred_labels = tf.argmax(logits,1)
 	true_labels = tf.cast(true_labels,tf.int64)
-	print pred_labels,true_labels
+	#print pred_labels.get_shape().as_list(),true_labels
 	correct_pred = tf.cast(tf.equal(pred_labels, true_labels), tf.float32)
 	accuracy = tf.reduce_mean(tf.cast(correct_pred,tf.float32))
 	return accuracy
